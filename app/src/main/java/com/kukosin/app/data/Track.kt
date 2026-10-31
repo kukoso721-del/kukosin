@@ -53,12 +53,6 @@ data class Track(
                     sampleRate >= 1000 -> add("${"%.1f".format(sampleRate / 1000.0)} kHz")
                     sampleRate > 0 -> add("$sampleRate Hz")
                 }
-                when (channels) {
-                    1 -> add("Mono")
-                    2 -> add("Estéreo")
-                    in 3..Int.MAX_VALUE -> add("${channels}ch")
-                }
-                if (sampleRate <= 0 && bitrate > 0) add("${bitrate / 1000} kbps")
             }
             return parts.joinToString(" · ")
         }

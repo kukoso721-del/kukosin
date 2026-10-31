@@ -10,10 +10,18 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.Charset
 
-data class LyricLine(
+data class LyricWord(
     val timeMs: Long,
     val text: String,
 )
+
+data class LyricLine(
+    val timeMs: Long,
+    val text: String,
+    val words: List<LyricWord> = emptyList(),
+) {
+    val isKaraoke: Boolean get() = words.size > 1
+}
 
 data class EmbeddedLyrics(
     val plainText: String,
@@ -320,8 +328,10 @@ internal object EmbeddedMetadata {
         if (body.size < 6) return current
         val encoding = body[0].toInt()
         val charset = charsetFor(encoding)
-        val lines = ArrayList<LyricLine>()
         var pos = 6
+        while (pos < body.size && body[pos] != 0.toByte()) pos++
+        pos += if (encoding == 1 || encoding == 2) 2 else 1
+        val events = ArrayList<Pair<Long, String>>()
         while (pos + 1 < body.size) {
             val start = pos
             while (pos < body.size && body[pos] != 0.toByte()) pos++
@@ -330,8 +340,9 @@ internal object EmbeddedMetadata {
             if (pos + 4 > body.size) break
             val stamp = ByteBuffer.wrap(body, pos, 4).order(ByteOrder.BIG_ENDIAN).int.toLong()
             pos += 4
-            if (text.isNotBlank()) lines += LyricLine(stamp, text)
+            events += stamp to text
         }
+        val lines = groupSyltEvents(events)
         if (lines.isEmpty()) return current
         val plain = lines.joinToString("\n") { it.text }
         return EmbeddedLyrics(plain, lines, "ID3 SYLT")
@@ -371,32 +382,108 @@ internal object EmbeddedMetadata {
     }
 
     fun parseLrc(text: String): List<LyricLine> {
-        val timestampRegex = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?]""")
+        val stampRegex = Regex("""[\[<](\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?[]>]""")
+        val metaRegex = Regex("""^\[([a-zA-Z]+):(.*)]$""")
         val result = mutableListOf<LyricLine>()
-        text.lineSequence().forEach { line ->
-            val trimmed = line.trim()
-            val matches = timestampRegex.findAll(trimmed).toList()
-            if (matches.isNotEmpty()) {
-                val lastMatch = matches.last()
-                val content = trimmed.substring(lastMatch.range.last + 1).trim()
-                if (content.isNotBlank()) {
-                    matches.forEach { match ->
-                        val min = match.groupValues[1].toLong()
-                        val sec = match.groupValues[2].toLong()
-                        val frac = match.groupValues[3]
-                        val ms = when (frac.length) {
-                            0 -> 0L
-                            1 -> frac.toLong() * 100
-                            2 -> frac.toLong() * 10
-                            else -> frac.take(3).toLong()
-                        }
-                        val timeMs = min * 60_000L + sec * 1000L + ms
-                        result.add(LyricLine(timeMs, content))
+        var offsetMs = 0L
+        text.lineSequence().forEach { rawLine ->
+            val trimmed = rawLine.trim()
+            if (trimmed.isEmpty()) return@forEach
+            val meta = metaRegex.matchEntire(trimmed)
+            if (meta != null && meta.groupValues[1].any { it.isLetter() }) {
+                if (meta.groupValues[1].equals("offset", ignoreCase = true)) {
+                    offsetMs = meta.groupValues[2].trim().toLongOrNull() ?: 0L
+                }
+                return@forEach
+            }
+            val stamps = stampRegex.findAll(trimmed).toList()
+            if (stamps.isEmpty()) return@forEach
+            val prefixOnly = stamps.all { it.value.startsWith("[") } &&
+                stamps.zipWithNext().all { (a, b) ->
+                    trimmed.substring(a.range.last + 1, b.range.first).isBlank()
+                } &&
+                trimmed.substring(0, stamps.first().range.first).isBlank()
+            if (prefixOnly) {
+                val content = trimmed.substring(stamps.last().range.last + 1).trim()
+                if (content.isBlank()) return@forEach
+                stamps.forEach { match ->
+                    result += LyricLine(parseStamp(match) + offsetMs, content)
+                }
+            } else {
+                val words = ArrayList<LyricWord>()
+                stamps.forEachIndexed { index, match ->
+                    val from = match.range.last + 1
+                    val to = if (index + 1 < stamps.size) stamps[index + 1].range.first else trimmed.length
+                    val piece = trimmed.substring(from, to)
+                    if (piece.isNotBlank()) {
+                        words += LyricWord(parseStamp(match) + offsetMs, piece)
                     }
                 }
+                if (words.isEmpty()) return@forEach
+                result += LyricLine(
+                    timeMs = parseStamp(stamps.first()) + offsetMs,
+                    text = words.joinToString("") { it.text }.replace(Regex("""\s+"""), " ").trim(),
+                    words = words,
+                )
             }
         }
         return result.sortedBy { it.timeMs }
+    }
+
+    internal fun groupSyltEvents(events: List<Pair<Long, String>>): List<LyricLine> {
+        if (events.isEmpty()) return emptyList()
+        val fragments = events.map { it.first to it.second.replace("\u0000", "") }
+        val wordLike = fragments.count { (_, text) ->
+            val t = text.trim()
+            t.isNotEmpty() && t.length <= 16 && !t.contains('\n')
+        } * 2 >= fragments.size
+        if (!wordLike) {
+            return fragments.mapNotNull { (time, text) ->
+                val t = text.trim()
+                if (t.isBlank()) null else LyricLine(time, t)
+            }
+        }
+        val lines = ArrayList<LyricLine>()
+        val words = ArrayList<LyricWord>()
+        fun flush() {
+            if (words.isEmpty()) return
+            val display = words.joinToString("") { it.text }
+            lines += LyricLine(
+                timeMs = words.first().timeMs,
+                text = display.replace(Regex("""\s+"""), " ").trim(),
+                words = words.toList(),
+            )
+            words.clear()
+        }
+        fragments.forEach { (time, text) ->
+            if (text.contains('\n')) {
+                text.split('\n').forEachIndexed { i, part ->
+                    if (part.isNotEmpty()) words += LyricWord(time, part)
+                    if (i < text.count { it == '\n' }) flush()
+                }
+            } else if (text.isBlank()) {
+                flush()
+            } else {
+                val gap = words.lastOrNull()?.let { time - it.timeMs } ?: 0L
+                if (words.isNotEmpty() && gap > 2_400L) flush()
+                words += LyricWord(time, text)
+            }
+        }
+        flush()
+        return lines
+    }
+
+    private fun parseStamp(match: MatchResult): Long {
+        val min = match.groupValues[1].toLong()
+        val sec = match.groupValues[2].toLong()
+        val frac = match.groupValues[3]
+        val ms = when (frac.length) {
+            0 -> 0L
+            1 -> frac.toLong() * 100
+            2 -> frac.toLong() * 10
+            else -> frac.take(3).toLong()
+        }
+        return min * 60_000L + sec * 1000L + ms
     }
 
     private fun synchsafe(data: ByteArray, offset: Int): Int {

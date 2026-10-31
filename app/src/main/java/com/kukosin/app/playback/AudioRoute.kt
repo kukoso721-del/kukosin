@@ -23,6 +23,9 @@ data class OutputDevice(
     val isBitPerfectSupported: Boolean = false,
     val sampleRatesLabel: String = "",
     val hasUsbPermission: Boolean = false,
+    val audioDeviceId: Int = 0,
+    val isUsb: Boolean = false,
+    val isBuiltin: Boolean = false,
 )
 
 @OptIn(UnstableApi::class)
@@ -32,13 +35,26 @@ object AudioRoute {
     )
     val current: StateFlow<OutputDevice> = output.asStateFlow()
 
+    @Volatile
+    var preferredAudioDevice: AudioDeviceInfo? = null
+        private set
+
+    @Volatile
+    var appContext: Context? = null
+        private set
+
     fun attach(context: Context, player: Player) {
+        appContext = context.applicationContext
         UsbDacManager.init(context)
         val audioManager = context.getSystemService(AudioManager::class.java) ?: return
 
         fun applyRoute() {
             val device = pickPreferred(audioManager)
+            preferredAudioDevice = device
             val usbInfo = UsbDacManager.current.value
+            if (usbInfo.hasUsbDevice && !usbInfo.hasPermission) {
+                UsbDacManager.requestPermission(context)
+            }
             output.value = describe(device, audioManager, usbInfo)
             if (player is ExoPlayer) {
                 if (device != null && device.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER && device.type != AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
@@ -131,6 +147,8 @@ object AudioRoute {
 
         val product = usbInfo.deviceName.ifBlank { device.productName?.toString()?.trim().orEmpty() }
         val name = product.ifBlank { typeLabel }
+        val isBuiltin = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ||
+            device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
         return OutputDevice(
             name = name,
             isDac = isDac,
@@ -138,6 +156,9 @@ object AudioRoute {
             isBitPerfectSupported = bitPerfect,
             sampleRatesLabel = ratesText,
             hasUsbPermission = usbInfo.hasPermission,
+            audioDeviceId = device.id,
+            isUsb = isUsbDac,
+            isBuiltin = isBuiltin,
         )
     }
 }

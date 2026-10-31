@@ -12,6 +12,11 @@ data class AudioConfig(
     val targetPcmFormat: String = "PCM Float 32-bit",
     val bitPerfectEnabled: Boolean = true,
     val autoAnalyze: Boolean = false,
+    val decoder: String = "FFmpeg (Lossless)",
+    val useOboeDirectOutput: Boolean = false,
+    val queueCompactMode: Boolean = false,
+    val showQueueBadge: Boolean = true,
+    val queueShowHistory: Boolean = true,
 ) {
     val targetSampleRateHz: Int
         get() = when (targetSampleRate) {
@@ -47,6 +52,11 @@ object AudioSettingsManager {
             targetPcmFormat = p.getString("target_pcm_format", "PCM Float 32-bit") ?: "PCM Float 32-bit",
             bitPerfectEnabled = p.getBoolean("bit_perfect_enabled", true),
             autoAnalyze = p.getBoolean("auto_analyze", false),
+            decoder = p.getString("decoder", "FFmpeg (Lossless)") ?: "FFmpeg (Lossless)",
+            useOboeDirectOutput = p.getBoolean("use_oboe_direct_output", false),
+            queueCompactMode = p.getBoolean("queue_compact_mode", false),
+            showQueueBadge = p.getBoolean("show_queue_badge", true),
+            queueShowHistory = p.getBoolean("queue_show_history", true),
         )
     }
 
@@ -73,5 +83,30 @@ object AudioSettingsManager {
     fun setAutoAnalyze(enabled: Boolean) {
         prefs?.edit()?.putBoolean("auto_analyze", enabled)?.apply()
         state.value = state.value.copy(autoAnalyze = enabled)
+    }
+
+    fun setDecoder(decoder: String) {
+        prefs?.edit()?.putString("decoder", decoder)?.apply()
+        state.value = state.value.copy(decoder = decoder)
+    }
+
+    fun setUseOboeDirectOutput(enabled: Boolean) {
+        prefs?.edit()?.putBoolean("use_oboe_direct_output", enabled)?.apply()
+        state.value = state.value.copy(useOboeDirectOutput = enabled)
+    }
+
+    fun setQueueCompactMode(compact: Boolean) {
+        prefs?.edit()?.putBoolean("queue_compact_mode", compact)?.apply()
+        state.value = state.value.copy(queueCompactMode = compact)
+    }
+
+    fun setShowQueueBadge(show: Boolean) {
+        prefs?.edit()?.putBoolean("show_queue_badge", show)?.apply()
+        state.value = state.value.copy(showQueueBadge = show)
+    }
+
+    fun setQueueShowHistory(show: Boolean) {
+        prefs?.edit()?.putBoolean("queue_show_history", show)?.apply()
+        state.value = state.value.copy(queueShowHistory = show)
     }
 }

@@ -30,6 +30,7 @@ object UsbDacManager {
     val current: StateFlow<UsbDacInfo> = statusFlow.asStateFlow()
 
     private var receiverRegistered = false
+    private var permissionRequested = false
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -74,9 +75,12 @@ object UsbDacManager {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager ?: return
         val device = findAudioDevice(usbManager) ?: return
         if (usbManager.hasPermission(device)) {
+            permissionRequested = false
             scanDevices(context)
             return
         }
+        if (permissionRequested) return
+        permissionRequested = true
 
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -95,12 +99,14 @@ object UsbDacManager {
     fun scanDevices(context: Context) {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
         if (usbManager == null) {
+            permissionRequested = false
             statusFlow.value = UsbDacInfo()
             return
         }
 
         val device = findAudioDevice(usbManager)
         if (device == null) {
+            permissionRequested = false
             statusFlow.value = UsbDacInfo()
             return
         }

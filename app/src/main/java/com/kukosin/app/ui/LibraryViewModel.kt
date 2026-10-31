@@ -201,6 +201,14 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         AudioSettingsManager.setBitPerfectEnabled(!audioConfig.value.bitPerfectEnabled)
     }
 
+    fun toggleOboeDirectOutput() {
+        AudioSettingsManager.setUseOboeDirectOutput(!audioConfig.value.useOboeDirectOutput)
+    }
+
+    fun setDecoder(decoder: String) {
+        AudioSettingsManager.setDecoder(decoder)
+    }
+
     fun setInspectTrack(track: Track?) {
         inspectTrack.value = track
         if (track != null) {

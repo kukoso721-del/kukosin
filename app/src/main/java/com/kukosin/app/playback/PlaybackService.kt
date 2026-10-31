@@ -4,6 +4,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        setMediaNotificationProvider(DefaultMediaNotificationProvider(this))
         AudioSettingsManager.init(this)
         recreatePlayer()
 
@@ -58,6 +60,7 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .setSkipSilenceEnabled(false)
             .build()
+        newPlayer.volume = 1f
 
         AudioRoute.attach(this, newPlayer)
         mediaSession = MediaSession.Builder(this, newPlayer).build()
